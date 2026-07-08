@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include "util.h"
 
-const pin_t dip_pins[] = ENCODER_SW_PINS;
+const pin_t dip_pins[] = DIRECT_SW_PINS;
 const uint8_t dip_rows[] = DIRECT_SW_ROWS;
 const uint8_t dip_cols[] = DIRECT_SW_COLS;
 
@@ -40,10 +40,10 @@ bool dip_matrix_scan(matrix_row_t *current_matrix) {
         matrix_row_t row_shifter = 1 << col;
         bool is_pressed = readMatrixPin(pin);
         if (is_pressed) {
-            current_row_value &= ~(row_shifter);
+            current_row_value |= row_shifter;
         }
         else {
-            current_row_value |= row_shifter;
+            current_row_value &= ~(row_shifter);
         }
         updated |= current_matrix[row] ^ current_row_value;
         current_matrix[row] = current_row_value;
