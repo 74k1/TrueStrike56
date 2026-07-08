@@ -3,195 +3,146 @@
 
 #include "graphics/display.h"
 #include "graphics/quinquefive.qff.h"
+#include "graphics/boot_anim.qgf.h"
 #include "he_switch_matrix.h"
 #include <stdio.h>
 
-static deferred_token stat_display_task_token;
-static deferred_token mods_display_task_token;
-
-static painter_device_t display;
+static painter_device_t      display;
 static painter_font_handle_t font;
+static deferred_token         anim_token;
+static deferred_token         refresh_token;
+static bool                   boot_done      = false;
+static bool                   dashboard_init = false; // first dashboard draw fully clears the boot splash
+static bool                   suspended      = false; // USB suspend: keep the OLED off and skip refreshes
 
-static bool last_nkro = false;
-static uint8_t last_mod_state = UINT8_MAX;
-
-void display_mod_update(uint8_t mod_state, uint8_t oneshot_mod_state);
-
-uint32_t stat_draw_callback(uint32_t trigger_time, void *cb_arg) {
-  display_task_kb();
-  return 1000;
-}
-
-uint32_t mods_draw_callback(uint32_t trigger_time, void *cb_arg) {
-  display_mod_update(get_mods(), get_oneshot_mods());
-  return 16;
+// Switch to dashboard at 3000ms: stop the (holding) boot animation and start the
+// periodic dashboard refresh. The one-shot full wipe is handled by
+// display_task_kb() via the dashboard_init flag.
+uint32_t refresh_callback(uint32_t trigger_time, void *cb_arg) {
+    qp_stop_animation(anim_token);
+    boot_done = true;
+    display_task_kb();
+    return 500;
 }
 
 void display_init_kb(void) {
-  display = qp_sh1106_make_i2c_device(128, 32, 0x3c);
-  qp_init(display, QP_ROTATION_180);
-  font = qp_load_font_mem(font_quinquefive);
-  if (!display_init_user()) {
-    return;
-  }
-  char buffer[40] = "Powered by QMK Ψ";
-  uint16_t width = qp_textwidth(font, buffer);
-  uint8_t height = font->line_height + 2;
-  qp_drawtext(display, 64 - width / 2, 33 - height, font, buffer);
-  snprintf(buffer, sizeof(buffer), "TrueStrike56");
-  width = qp_textwidth(font, buffer);
-  qp_drawtext(display, 64 - width / 2, 33, font, buffer);
-  qp_flush(display);
-  mods_display_task_token = defer_exec(2000, mods_draw_callback, NULL);
-  stat_display_task_token = defer_exec(2000, stat_draw_callback, NULL);
+    display = qp_sh1106_make_i2c_device(128, 32, 0x3c);
+    qp_init(display, QP_ROTATION_90);
+    font    = qp_load_font_mem(font_quinquefive);
+    if (!display_init_user()) return;
+
+    // Blank the physical GDDRAM first — qp_init turns the display on but
+    // doesn't clear it, so on a soft reboot stale dashboard content would
+    // bleed through under the animation's delta frames.
+    qp_clear(display);
+    qp_flush(display);
+
+    // The last frame of the boot animation has a long (60s) delay baked into
+    // the QGF, so it holds on the final frame without looping. The dashboard
+    // takes over at 3000ms and stops the animation.
+    anim_token = qp_animate(display, 0, 0, qp_load_image_mem(gfx_boot_anim));
+    qp_flush(display);
+
+    refresh_token = defer_exec(3000, refresh_callback, NULL);
 }
 
 __attribute__((weak)) bool display_init_user(void) { return true; }
+void display_key_counter(void) {}
+__attribute__((weak)) bool display_task_user(void) { return true; }
 
-void display_layer_state(layer_state_t state) {
-  uint16_t highest_layer = get_highest_layer(state);
-
-  char buffer[5] = {0};
-
-  snprintf(buffer, sizeof(buffer), "%4d", highest_layer);
-  qp_drawtext(display, 100, 14, font, buffer);
+// Lock-LED indicators: three boxes (N/C/S) that fill white when active.
+// Adapted from rev1 for the 32px-wide rotated panel.
+static void draw_led_state(led_t state) {
+    static const char *const labels[3] = {"N", "C", "S"};
+    const bool               active[3] = {state.num_lock, state.caps_lock, state.scroll_lock};
+    static const uint8_t     bx[3]     = {1, 11, 21};
+    for (uint8_t i = 0; i < 3; i++) {
+        uint8_t x = bx[i];
+        qp_rect(display, x, 2, x + 8, 9, 0, 0, 255, active[i]);
+        if (!active[i]) {
+            qp_rect(display, x + 1, 3, x + 7, 8, 0, 0, 0, true);
+        }
+        qp_drawtext_recolor(display, x + 2, 3, font, labels[i],
+                            0, 0, active[i] ? 0 : 255,
+                            0, 0, active[i] ? 255 : 0);
+    }
 }
 
-void display_led_state(led_t state) {
-  qp_rect(display, 2, 2, 10, 10, 0, 0, 255, state.num_lock);
-  if (!state.num_lock) {
-    qp_rect(display, 3, 3, 9, 9, 0, 0, 0, true);
-  }
-  qp_drawtext_recolor(display, 4, 4, font, "N", 0, 0, state.num_lock ? 0 : 255,
-                      0, 0, state.num_lock ? 255 : 0);
-  qp_rect(display, 13, 2, 21, 10, 0, 0, 255, state.caps_lock);
-  if (!state.caps_lock) {
-    qp_rect(display, 14, 3, 20, 9, 0, 0, 0, true);
-  }
-  qp_drawtext_recolor(display, 15, 4, font, "C", 0, 0,
-                      state.caps_lock ? 0 : 255, 0, 0,
-                      state.caps_lock ? 255 : 0);
-  qp_rect(display, 24, 2, 32, 10, 0, 0, 255, state.scroll_lock);
-  if (!state.scroll_lock) {
-    qp_rect(display, 25, 3, 31, 9, 0, 0, 0, true);
-  }
-  qp_drawtext_recolor(display, 26, 4, font, "S", 0, 0,
-                      state.scroll_lock ? 0 : 255, 0, 0,
-                      state.scroll_lock ? 255 : 0);
-}
+static void draw_dashboard(void) {
+    char b[6];
 
-void display_nkro_state(bool nkro) {
-  qp_rect(display, 35, 2, 61, 10, 0, 0, 255, nkro);
-  if (!nkro) {
-    qp_rect(display, 36, 3, 60, 9, 0, 0, 0, true);
-  }
-  qp_drawtext_recolor(display, 37, 4, font, "NKRO", 0, 0, nkro ? 0 : 255, 0, 0,
-                      nkro ? 255 : 0);
-}
+    // Row 0: lock LEDs (filled boxes, white when active)
+    draw_led_state(host_keyboard_led_state());
 
-void display_mod_state(uint8_t mod_state, uint8_t oneshot_mod_state) {
-  if (mod_state & MOD_MASK_CTRL) {
-    qp_drawtext(display, 86, 4, font, "C");
-  } else {
-    qp_drawtext(display, 86, 4, font, " ");
-  }
-  if (mod_state & MOD_MASK_ALT) {
-    qp_drawtext(display, 97, 4, font, "A");
-  } else {
-    qp_drawtext(display, 97, 4, font, " ");
-  }
-  if (mod_state & MOD_MASK_GUI) {
-    qp_drawtext(display, 108, 4, font, "G");
-  } else {
-    qp_drawtext(display, 108, 4, font, " ");
-  }
-  if (mod_state & MOD_MASK_SHIFT) {
-    qp_drawtext(display, 119, 4, font, "S");
-  } else {
-    qp_drawtext(display, 119, 4, font, " ");
-  }
+    // Row 1: layer
+    uint8_t layer = get_highest_layer(layer_state);
+    snprintf(b, sizeof(b), "L%u", layer);
+    qp_drawtext(display, 2, 11, font, b);
+
+    // Row 2: scan rate
+    uint32_t rate = get_matrix_scan_rate();
+    snprintf(b, sizeof(b), "%-5lu", (unsigned long)rate);
+    qp_drawtext(display, 2, 20, font, b);
+
+    // Row 3: RT + NKRO
+    snprintf(b, sizeof(b), "%s %s",
+             he_config.actuation_mode ? "RT" : "AP",
+             keymap_config.nkro ? "6K" : "nk");
+    qp_drawtext(display, 2, 29, font, b);
 }
 
 void display_task_kb(void) {
-  if (!display_task_user()) {
-    return;
-  }
-
-  static bool first_draw = true;
-  static uint32_t last_scan_rate = 0;
-  static uint8_t last_actuation_mode = UINT8_MAX;
-  bool diff = false;
-
-  if (first_draw) {
-    qp_clear(display);
-    qp_drawtext(display, 4, 14, font, "Active Layer  =");
-    qp_drawtext(display, 4, 21, font, "Scan Rate     =");
-    qp_drawtext(display, 4, 28, font, "Rapid Trigger =");
-    display_led_state(host_keyboard_led_state());
-    display_layer_state(layer_state);
-    display_nkro_state(keymap_config.nkro);
-    last_nkro = keymap_config.nkro;
-    first_draw = false;
-    diff = true;
-  }
-
-  char buffer[5] = {0};
-
-  uint32_t scan_rate = get_matrix_scan_rate();
-  if (last_scan_rate != scan_rate) {
-    snprintf(buffer, sizeof(buffer), "%4ld", scan_rate);
-    // int16_t width = qp_textwidth(font, buffer);
-    qp_drawtext(display, 100, 21, font, buffer);
-    last_scan_rate = scan_rate;
-    diff = true;
-  }
-
-  if (last_actuation_mode != he_config.actuation_mode) {
-    if (he_config.actuation_mode == 0) {
-      qp_drawtext(display, 106, 28, font, "OFF");
+    if (!display_task_user()) return;
+    // Block any dashboard drawing during the boot animation or while suspended.
+    if (!boot_done || suspended) return;
+    // The dashboard lives in the top-left corner (4 rows of 5px text at
+    // y=2..34). Only clear that region so qp_flush ships ~160 bytes instead
+    // of the full 512-byte framebuffer, keeping the main loop responsive.
+    if (!dashboard_init) {
+        qp_clear(display); // one-shot full clear to erase the boot splash
+        dashboard_init = true;
     } else {
-      qp_drawtext(display, 106, 28, font, " ON");
+        qp_rect(display, 0, 0, 31, 39, 0, 0, 0, true);
     }
-    last_actuation_mode = he_config.actuation_mode;
-    diff = true;
-  }
-
-  if (diff) {
+    draw_dashboard();
     qp_flush(display);
-  }
+}
+
+// Redraw the lock-LED row immediately when the host changes LED state, instead
+// of waiting up to 500ms for the next dashboard tick.
+bool led_update_kb(led_t led_state) {
+    bool res = led_update_user(led_state);
+    if (res && boot_done && !suspended) {
+        qp_rect(display, 0, 0, 31, 10, 0, 0, 0, true);
+        draw_led_state(led_state);
+        qp_flush(display);
+    }
+    return res;
 }
 
 layer_state_t layer_state_set_kb(layer_state_t state) {
-  state = layer_state_set_user(state);
-  display_layer_state(state);
-  qp_flush(display);
-  return state;
+    state = layer_state_set_user(state);
+    if (boot_done && !suspended) {
+        display_task_kb();
+    }
+    return state;
 }
 
-bool led_update_kb(led_t led_state) {
-  bool res = led_update_user(led_state);
-  if (res) {
-    display_led_state(led_state);
-    qp_flush(display);
-  }
-  return res;
+// USB suspend (host off / asleep): power the OLED down so it doesn't stay lit,
+// and gate refreshes. suspend_power_down_kb is called repeatedly while suspended,
+// so only act on the transition.
+void suspend_power_down_kb(void) {
+    if (!suspended) {
+        suspended = true;
+        qp_power(display, false);
+    }
+    suspend_power_down_user();
 }
 
-__attribute__((weak)) bool display_task_user(void) { return true; }
-
-void display_mod_update(uint8_t mod_state, uint8_t oneshot_mod_state) {
-  bool diff = false;
-  if (last_mod_state != mod_state) {
-    display_mod_state(mod_state, oneshot_mod_state);
-    diff = true;
-    last_mod_state = mod_state;
-  }
-  if (last_nkro != keymap_config.nkro) {
-    display_nkro_state(keymap_config.nkro);
-    diff = true;
-    last_nkro = keymap_config.nkro;
-  }
-  if (diff) {
-    qp_flush(display);
-  }
+void suspend_wakeup_init_kb(void) {
+    suspended      = false;
+    dashboard_init = false; // force a full clear/redraw after resume
+    qp_power(display, true);
+    display_task_kb();
+    suspend_wakeup_init_user();
 }
