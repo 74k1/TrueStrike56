@@ -21,7 +21,6 @@
 #include "graphics/display.h"
 #include "he_switch_matrix.h"
 #include "keyboard.h"
-#include "rgb_matrix.h"
 #include "he_switch_matrix.h"
 
 void eeconfig_init_kb(void) {
@@ -71,11 +70,4 @@ void keyboard_post_init_kb(void) {
     }
 
     keyboard_post_init_user();
-}
-
-bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
-    if (record->event.pressed) {
-        display_key_counter();
-    }
-    return process_record_user(keycode, record);
 }
