@@ -142,7 +142,16 @@ void suspend_power_down_kb(void) {
 void suspend_wakeup_init_kb(void) {
     suspended      = false;
     dashboard_init = false; // force a full clear/redraw after resume
+    // Full re-init the display rather than just powering on: USB suspend can
+    // leave the I2C peripheral / surface dirty-state in an inconsistent spot,
+    // which makes qp_flush ship a full frame every task tick after resume and
+    // crushes the matrix scan rate. qp_init re-inits the surface framebuffer
+    // (zeroed, full dirty mark) and the SH1106 hardware, so the next flush is
+    // a clean baseline instead of a corrupted one.
+    qp_init(display, QP_ROTATION_90);
     qp_power(display, true);
+    qp_clear(display);
+    qp_flush(display);
     display_task_kb();
     suspend_wakeup_init_user();
 }
