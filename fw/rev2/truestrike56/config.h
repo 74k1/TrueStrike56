@@ -37,7 +37,7 @@
 
 #define DIRECT_SW_ROWS { 3 }
 #define DIRECT_SW_COLS { 8 }
-#define DIRECT_SW_PINS { GP23 }
+#define ENCODER_SW_PINS { GP23 }
 
 #define REVERSE_POLARITY
 

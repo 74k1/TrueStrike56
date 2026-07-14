@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include "util.h"
 
-const pin_t dip_pins[] = DIRECT_SW_PINS;
+const pin_t dip_pins[] = ENCODER_SW_PINS;
 const uint8_t dip_rows[] = DIRECT_SW_ROWS;
 const uint8_t dip_cols[] = DIRECT_SW_COLS;
 
