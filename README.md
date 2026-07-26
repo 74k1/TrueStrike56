@@ -1,5 +1,10 @@
 # TrueStrike56
-![](.github/res/rev2/truestrike56-built.jpg)
+
+![](.github/res/rev2/TrueStrike-built1.jpg)
+
+| ![](.github/res/rev2/TrueStrike-built2.jpg) | ![](.github/res/rev2/TrueStrike-built3.jpg) |
+| --- | --- |
+
 
 TrueStrike56 is a spin-off from the original [TrueStrike42](https://github.com/byungyoonc/TrueStrike42) with an additional number row and 2 more thumb-keys. Making it a 4x6_4 layout.
 
@@ -69,5 +74,5 @@ The value ranges from 1 (Topmost) to 255 (Bottommost).
 
 | Credit | Reason |
 | ---: | --- |
-| (byungyoonc)[https://github.com/byungyoonc] | For the **entire** Engineering of the [PCBs](/hw) (rev1 and rev2) and the Technical side of things (including initial firmware setup) have been done by Byungyoon. |
-| (74k1)[https://github.com/74k1] | For the commission and the [Case](hw/rev2/case) as well as the small new logo. |
+| [byungyoonc](https://github.com/byungyoonc) | For the **entire** Engineering of the [PCBs](/hw) (rev1 and rev2) and the Technical side of things (including initial firmware setup) have been done by Byungyoon. |
+| [74k1](https://github.com/74k1) | For the commission and the [Case](hw/rev2/case) as well as the small new logo. |
